@@ -45,7 +45,7 @@ func V2CoinbaseTxn(label string) (cb1, cb2 string) {
 	enc.Flush()
 	coinbaseBuf := buf.Bytes()
 	cb1Buf := coinbaseBuf[:len(coinbaseBuf)-8] // trim extranonce placeholders
-	return hex.EncodeToString(cb1Buf), ""
+	return hex.EncodeToString(cb1Buf), ""      // coinbase2 is empty in v2 transactions because unset fields are excluded from the encoding
 }
 
 // BlockMerkleBranches returns the merkle branches for the given
