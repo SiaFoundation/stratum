@@ -117,7 +117,7 @@ func bigToCompact(n *big.Int) uint32 {
 	return compact
 }
 
-func (s *Server) getBlockForBroadcast(addr types.Address, nonce, extranonce1, extranonce2 []byte) (types.Block, error) {
+func (s *Server) getBlockForBroadcast(addr types.Address, nonce, extranonce1, extranonce2 []byte, timestamp time.Time) (types.Block, error) {
 	cs, err := s.client.ConsensusTipState()
 	if err != nil {
 		return types.Block{}, fmt.Errorf("failed to get consensus tip state: %w", err)
@@ -131,7 +131,7 @@ func (s *Server) getBlockForBroadcast(addr types.Address, nonce, extranonce1, ex
 	}
 	b := types.Block{
 		ParentID:  cs.Index.ID,
-		Timestamp: time.Now(),
+		Timestamp: timestamp,
 		Nonce:     binary.BigEndian.Uint64(nonce),
 		MinerPayouts: []types.SiacoinOutput{
 			{Address: addr, Value: cs.BlockReward()},
@@ -369,8 +369,9 @@ func (s *Server) Listen(l net.Listener) error {
 							continue
 						}
 
-						//nTimeStr := paramOrDefault(req.Params, 3, "")
+						nTimeStr := paramOrDefault(req.Params, 3, "")
 						nonceStr := paramOrDefault(req.Params, 4, "")
+						log.Debug("params", zap.String("nTime", nTimeStr), zap.String("nonce", nonceStr))
 
 						nonce, err := hex.DecodeString(nonceStr)
 						if err != nil {
@@ -378,16 +379,25 @@ func (s *Server) Listen(l net.Listener) error {
 							writeResponse(req, false, []any{"invalid nonce"})
 							continue
 						}
+						t, err := hex.DecodeString(nTimeStr)
+						if err != nil {
+							log.Debug("failed to decode nTime", zap.String("nTimeStr", nTimeStr), zap.Error(err))
+							writeResponse(req, false, []any{"invalid nTime"})
+							continue
+						}
+						timestamp := types.NewBufDecoder(t).ReadTime()
+
 						log := log.With(zap.String("jobID", jobID), zap.String("nonce", nonceStr), zap.Uint64("nonceU64", binary.BigEndian.Uint64(nonce)))
 
-						b, err := s.getBlockForBroadcast(types.VoidAddress, nonce, extranonce1, extranonce2)
+						b, err := s.getBlockForBroadcast(types.VoidAddress, nonce, extranonce1, extranonce2, timestamp)
 						if err != nil {
 							log.Debug("failed to get block for broadcast", zap.Error(err))
 							writeResponse(req, false, []any{"invalid nonce"})
 							continue
 						}
 
-						log.Debug("built block", zap.Stringer("id", b.ID()), zap.Stringer("target", cs.ChildTarget))
+						log.Debug("built block", zap.Stringer("id", b.ID()), zap.Stringer("target", cs.ChildTarget),
+							zap.String("nTimeStr", nTimeStr), zap.String("nonceStr", nonceStr))
 						extranonce1 = frand.Bytes(4)
 
 						if err := s.client.SyncerBroadcastBlock(b); err != nil {
