@@ -10,7 +10,7 @@ import (
 	"os/signal"
 
 	"go.sia.tech/poold/stratum"
-	"go.sia.tech/walletd/api"
+	"go.sia.tech/walletd/v2/api"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -20,7 +20,7 @@ func main() {
 		stratumAddress  = ":9988"
 		logLevel        = "debug"
 		walletdAddr     = "http://localhost:9980/api"
-		walletdPassword = ""
+		walletdPassword = "sia is cool"
 	)
 	flag.StringVar(&stratumAddress, "stratum.address", stratumAddress, "address to listen on")
 	flag.StringVar(&walletdAddr, "walletd.address", walletdAddr, "address of walletd")
