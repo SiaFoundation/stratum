@@ -132,7 +132,7 @@ func (s *Server) getBlockForBroadcast(addr types.Address, nonce, extranonce1, ex
 	b := types.Block{
 		ParentID:  cs.Index.ID,
 		Timestamp: timestamp,
-		Nonce:     binary.BigEndian.Uint64(nonce),
+		Nonce:     binary.LittleEndian.Uint64(nonce),
 		MinerPayouts: []types.SiacoinOutput{
 			{Address: addr, Value: cs.BlockReward()},
 		},
@@ -243,7 +243,7 @@ func (s *Server) Listen(l net.Listener) error {
 				coinbase2 := coinbaseBuf[len(coinbaseBuf)-8:]
 
 				timeBuf := make([]byte, 8)
-				binary.LittleEndian.PutUint64(timeBuf, uint64(types.CurrentTimestamp().UnixMilli()))
+				binary.LittleEndian.PutUint64(timeBuf, uint64(cs.PrevTimestamps[0].Unix()))
 
 				err = writeRequest("mining.notify", []any{
 					fmt.Sprintf("%d", nextID()),   // jobID
@@ -286,7 +286,7 @@ func (s *Server) Listen(l net.Listener) error {
 
 			// sent in mining.subscribe and used by the miner to build the coinbase transaction
 			// should be regenerated every time a block is mined
-			extranonce1 := frand.Bytes(4)
+			extranonce1 := make([]byte, 4) // frand.Bytes(4)
 
 			for {
 				select {
@@ -347,6 +347,7 @@ func (s *Server) Listen(l net.Listener) error {
 							//
 							// I have no idea what to set this to and it's entirely
 							// possible I'm not calculating the difficulty correctly.
+							//diff,
 							10000,
 						})
 						if err := sendNotify(true); err != nil {
@@ -387,7 +388,7 @@ func (s *Server) Listen(l net.Listener) error {
 						}
 
 						fmt.Println("received time", timeBuf)
-						timestamp := time.UnixMilli(int64(binary.LittleEndian.Uint64(timeBuf)))
+						timestamp := time.Unix(int64(binary.LittleEndian.Uint64(timeBuf)), 0)
 
 						log := log.With(zap.String("jobID", jobID), zap.String("nonce", nonceStr), zap.Uint64("nonceU64", binary.BigEndian.Uint64(nonce)),
 							zap.Time("nTime", timestamp))
@@ -401,7 +402,7 @@ func (s *Server) Listen(l net.Listener) error {
 
 						log.Debug("built block", zap.Stringer("id", b.ID()), zap.Stringer("target", cs.ChildTarget),
 							zap.String("nTimeStr", nTimeStr), zap.String("nonceStr", nonceStr))
-						extranonce1 = frand.Bytes(4)
+						//extranonce1 = frand.Bytes(4)
 
 						if err := s.client.SyncerBroadcastBlock(b); err != nil {
 							log.Debug("failed to broadcast block", zap.Error(err))
