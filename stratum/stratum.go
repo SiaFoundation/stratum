@@ -243,7 +243,7 @@ func (s *Server) Listen(l net.Listener) error {
 				coinbase2 := coinbaseBuf[len(coinbaseBuf)-8:]
 
 				timeBuf := make([]byte, 8)
-				binary.LittleEndian.PutUint64(timeBuf, uint64(cs.PrevTimestamps[0].UnixMilli()))
+				binary.LittleEndian.PutUint64(timeBuf, uint64(types.CurrentTimestamp().UnixMilli()))
 
 				err = writeRequest("mining.notify", []any{
 					fmt.Sprintf("%d", nextID()),   // jobID
@@ -379,15 +379,18 @@ func (s *Server) Listen(l net.Listener) error {
 							writeResponse(req, false, []any{"invalid nonce"})
 							continue
 						}
-						t, err := hex.DecodeString(nTimeStr)
+						timeBuf, err := hex.DecodeString(nTimeStr)
 						if err != nil {
 							log.Debug("failed to decode nTime", zap.String("nTimeStr", nTimeStr), zap.Error(err))
 							writeResponse(req, false, []any{"invalid nTime"})
 							continue
 						}
-						timestamp := types.NewBufDecoder(t).ReadTime()
 
-						log := log.With(zap.String("jobID", jobID), zap.String("nonce", nonceStr), zap.Uint64("nonceU64", binary.BigEndian.Uint64(nonce)))
+						fmt.Println("received time", timeBuf)
+						timestamp := time.UnixMilli(int64(binary.LittleEndian.Uint64(timeBuf)))
+
+						log := log.With(zap.String("jobID", jobID), zap.String("nonce", nonceStr), zap.Uint64("nonceU64", binary.BigEndian.Uint64(nonce)),
+							zap.Time("nTime", timestamp))
 
 						b, err := s.getBlockForBroadcast(types.VoidAddress, nonce, extranonce1, extranonce2, timestamp)
 						if err != nil {
