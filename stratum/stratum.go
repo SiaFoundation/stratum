@@ -243,7 +243,8 @@ func (s *Server) Listen(l net.Listener) error {
 				coinbase2 := coinbaseBuf[len(coinbaseBuf)-8:]
 
 				timeBuf := make([]byte, 8)
-				binary.LittleEndian.PutUint64(timeBuf, uint64(cs.PrevTimestamps[0].Unix()))
+				binary.LittleEndian.PutUint64(timeBuf, uint64(types.CurrentTimestamp().Unix()))
+				log.Debug("sent time", zap.String("time", fmt.Sprint(timeBuf)))
 
 				err = writeRequest("mining.notify", []any{
 					fmt.Sprintf("%d", nextID()),   // jobID
@@ -387,7 +388,7 @@ func (s *Server) Listen(l net.Listener) error {
 							continue
 						}
 
-						fmt.Println("received time", timeBuf)
+						log.Debug("received time", zap.String("time", fmt.Sprint(timeBuf)))
 						timestamp := time.Unix(int64(binary.LittleEndian.Uint64(timeBuf)), 0)
 
 						log := log.With(zap.String("jobID", jobID), zap.String("nonce", nonceStr), zap.Uint64("nonceU64", binary.BigEndian.Uint64(nonce)),
