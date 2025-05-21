@@ -6,8 +6,8 @@ import (
 	"go.sia.tech/core/types"
 )
 
-// ExampleCoinbaseTxn demonstrates how to create a coinbase transaction
-// suit
+// ExampleCoinbaseTxn demonstrates how to create a coinbase
+// v1 transaction suitable for Stratum mining.
 func ExampleCoinbaseTxn() {
 	const label = "mining pool test"
 
