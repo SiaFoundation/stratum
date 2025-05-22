@@ -3,6 +3,7 @@ package stratum
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
 
 	"go.sia.tech/core/blake2b"
 	"go.sia.tech/core/consensus"
@@ -46,6 +47,40 @@ func V2CoinbaseTxn(label string) (cb1, cb2 string) {
 	coinbaseBuf := buf.Bytes()
 	cb1Buf := coinbaseBuf[:len(coinbaseBuf)-8] // trim extranonce placeholders
 	return hex.EncodeToString(cb1Buf), ""      // coinbase2 is empty in v2 transactions because unset fields are excluded from the encoding
+}
+
+// ParseCoinbaseTxn parses the coinbase transaction from the given
+// coinbase1, extranonce1, extranonce2, and coinbase2 strings.
+func ParseCoinbaseTxn(cb1, extranonce1, extranonce2, cb2 string) (types.Transaction, error) {
+	txnStr := cb1 + extranonce1 + extranonce2 + cb2
+	txnBuf, err := hex.DecodeString(txnStr)
+	if err != nil {
+		return types.Transaction{}, fmt.Errorf("failed to decode coinbase string: %w", err)
+	}
+	dec := types.NewBufDecoder(txnBuf)
+	var txn types.Transaction
+	txn.DecodeFrom(dec)
+	if dec.Err() != nil {
+		return types.Transaction{}, fmt.Errorf("failed to decode coinbase bytes: %w", dec.Err())
+	}
+	return txn, nil
+}
+
+// ParseV2CoinbaseTxn parses the coinbase transaction from the given
+// coinbase1, extranonce1, extranonce2, and coinbase2 strings.
+func ParseV2CoinbaseTxn(cb1, extranonce1, extranonce2, cb2 string) (types.V2Transaction, error) {
+	txnStr := cb1 + extranonce1 + extranonce2 + cb2
+	txnBuf, err := hex.DecodeString(txnStr)
+	if err != nil {
+		return types.V2Transaction{}, fmt.Errorf("failed to decode coinbase string: %w", err)
+	}
+	dec := types.NewBufDecoder(txnBuf)
+	var txn types.V2Transaction
+	txn.DecodeFrom(dec)
+	if dec.Err() != nil {
+		return types.V2Transaction{}, fmt.Errorf("failed to decode coinbase bytes: %w", dec.Err())
+	}
+	return txn, nil
 }
 
 // BlockMerkleBranches returns the merkle branches for the given
