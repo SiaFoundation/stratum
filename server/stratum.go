@@ -1,17 +1,17 @@
 package server
 
 import (
-	"bytes"
+	"bufio"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"math/big"
 	"net"
 	"strings"
 	"time"
 
+	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/stratum"
 	"go.sia.tech/walletd/v2/api"
@@ -118,26 +118,15 @@ func bigToCompact(n *big.Int) uint32 {
 	return compact
 }
 
-func (s *Server) getBlockForBroadcast(addr types.Address, nonce, extranonce1, extranonce2 []byte, timestamp time.Time) (types.Block, error) {
-	cs, err := s.client.ConsensusTipState()
-	if err != nil {
-		return types.Block{}, fmt.Errorf("failed to get consensus tip state: %w", err)
-	}
-
-	spec := types.NewSpecifier("NonSia")
-	coinbaseTxn := types.Transaction{
-		ArbitraryData: [][]byte{
-			append(spec[:], append(extranonce1, extranonce2...)...),
-		},
-	}
+func (s *Server) getBlockForBroadcast(cs consensus.State, addr types.Address, nonce uint64, timestamp time.Time, arbTxn types.Transaction) (types.Block, error) {
 	b := types.Block{
 		ParentID:  cs.Index.ID,
 		Timestamp: timestamp,
-		Nonce:     binary.LittleEndian.Uint64(nonce),
+		Nonce:     nonce,
 		MinerPayouts: []types.SiacoinOutput{
 			{Address: addr, Value: cs.BlockReward()},
 		},
-		Transactions: []types.Transaction{coinbaseTxn},
+		Transactions: []types.Transaction{arbTxn},
 	}
 	return b, nil
 }
@@ -168,18 +157,13 @@ func (s *Server) Listen(l net.Listener) error {
 			difficultySubscriptionID := hex.EncodeToString(frand.Bytes(4))
 			notifySubscriptionID := hex.EncodeToString(frand.Bytes(4))
 
-			readRequest := func() (req StratumRequest, err error) {
-				buf := bytes.NewBuffer(nil)
-				dec := json.NewDecoder(io.TeeReader(conn, buf))
-				err = dec.Decode(&req)
-				return
-			}
-
-			writeResponse := func(req StratumRequest, result any, error []any) error {
+			writeResponse := func(req StratumRequest, result any, errStr string) error {
 				resp := StratumResponse{
 					ID:     req.ID,
 					Result: result,
-					Error:  error,
+				}
+				if errStr != "" {
+					resp.Error = &errStr
 				}
 				buf, err := json.Marshal(resp)
 				if err != nil {
@@ -213,49 +197,33 @@ func (s *Server) Listen(l net.Listener) error {
 				return nil
 			}
 
+			// global session state
+			var (
+				extranonce1          = hex.EncodeToString(frand.Bytes(4))
+				coinbase1, coinbase2 = stratum.CoinbaseTxn("Sia Solo Stratum")
+			)
+
 			sendNotify := func(clean bool) error {
 				cs, err := s.client.ConsensusTipState()
 				if err != nil {
 					return fmt.Errorf("failed to get consensus tip state: %w", err)
 				}
 
-				prefixNonSia := types.NewSpecifier("NonSia")
-				arbData := append(prefixNonSia[:], make([]byte, 8)...)
-				trim := len(arbData) + 8 // arbitrary data + 8 byte signature length prefix
-				coinbaseTxn := types.Transaction{
-					ArbitraryData: [][]byte{
-						arbData, // placeholder data
-					},
-				}
-				txnBuf := bytes.NewBuffer(nil)
-				enc := types.NewEncoder(txnBuf)
-				coinbaseTxn.EncodeTo(enc)
-				if err := enc.Flush(); err != nil {
-					return fmt.Errorf("failed to encode coinbase txn: %w", err)
-				}
-				// the miner will do coinbase1 + extranonce1 + extranonce2 + coinbase2
-				// coinbase1 is the transaction up to the arbitrary data length prefix
-				// extranonce1 is the 4 random bytes we sent in mining.subscribe
-				// extranonce2 is the 4 random bytes the miner sends in mining.submit
-				// coinbase2 is the 0 length prefix for signatures
-				coinbaseBuf := txnBuf.Bytes()
-				coinbase1 := coinbaseBuf[:len(coinbaseBuf)-trim]
-				coinbase2 := coinbaseBuf[len(coinbaseBuf)-8:]
-
+				nTime := types.CurrentTimestamp()
 				timeBuf := make([]byte, 8)
-				binary.LittleEndian.PutUint64(timeBuf, uint64(types.CurrentTimestamp().Unix()))
-				log.Debug("sent time", zap.String("time", fmt.Sprint(timeBuf)))
+				binary.LittleEndian.PutUint64(timeBuf, uint64(nTime.Unix()))
+				log.Debug("sent time", zap.Time("nTime", nTime))
 
 				err = writeRequest("mining.notify", []any{
-					fmt.Sprintf("%d", nextID()),   // jobID
-					cs.Index.ID,                   // parent ID
-					hex.EncodeToString(coinbase1), // encoded transaction minus arbitrary data + signatures
-					hex.EncodeToString(coinbase2), // encoded transaction signature length prefix
+					fmt.Sprintf("%d", nextID()), // jobID
+					cs.Index.ID,                 // parent ID
+					coinbase1,
+					coinbase2,
 					stratum.BlockMerkleBranches(cs, []types.SiacoinOutput{
 						{Address: types.VoidAddress, Value: cs.BlockReward()},
 					}, []types.Transaction{}, nil), // merkle tree of the rest of the block contents
 					"", // version???
-					fmt.Sprintf("%08x", bigToCompact(new(big.Int).SetBytes(cs.ChildTarget[:]))), // optional
+					"",
 					hex.EncodeToString(timeBuf), // block time
 					clean,                       // clean jobs
 				})
@@ -265,36 +233,31 @@ func (s *Server) Listen(l net.Listener) error {
 				return nil
 			}
 
-			errCh := make(chan error, 1)
 			requests := make(chan StratumRequest, 1)
 
 			go func() {
-				for {
+				rr := bufio.NewScanner(conn)
+				for rr.Scan() {
 					select {
 					case <-s.closed:
 						return
 					default:
 					}
 
-					req, err := readRequest()
-					if err != nil {
-						errCh <- fmt.Errorf("failed to decode request: %w", err)
-						return
+					line := rr.Bytes()
+					var req StratumRequest
+					if err := json.Unmarshal(line, &req); err != nil {
+						log.Warn("failed to decode request", zap.String("line", string(line)), zap.Error(err))
+						continue
 					}
+					log.Debug("request received", zap.String("request", string(line)))
 					requests <- req
 				}
 			}()
 
-			// sent in mining.subscribe and used by the miner to build the coinbase transaction
-			// should be regenerated every time a block is mined
-			extranonce1 := make([]byte, 4) // frand.Bytes(4)
-
 			for {
 				select {
 				case <-s.closed:
-					return
-				case err := <-errCh:
-					log.Warn("request error", zap.Error(err))
 					return
 				case req := <-requests:
 					log.Debug("request received", zap.Any("request", req))
@@ -310,19 +273,14 @@ func (s *Server) Listen(l net.Listener) error {
 								[]any{"mining.set_difficulty", difficultySubscriptionID},
 								[]any{"mining.notify", notifySubscriptionID},
 							},
-							hex.EncodeToString(extranonce1),
+							extranonce1,
 							4,
-						}, nil)
+						}, "")
 						if err != nil {
 							log.Warn("failed to encode response", zap.Error(err))
 							return
 						}
 					case "mining.authorize":
-						cs, err := s.client.ConsensusTipState()
-						if err != nil {
-							log.Debug("failed to get tip")
-							return
-						}
 						workerName := paramOrDefault(req.Params, 0, "")
 						workerName, walletAddress, ok := strings.Cut(workerName, ".")
 						if !ok {
@@ -332,14 +290,11 @@ func (s *Server) Listen(l net.Listener) error {
 						var addr types.Address
 						if err := addr.UnmarshalText([]byte(walletAddress)); err != nil {
 							log.Debug("failed to parse wallet address", zap.String("address", walletAddress), zap.Error(err))
-							writeResponse(req, false, []any{"client name must be a valid Sia address"})
+							writeResponse(req, false, "invalid address")
 							continue
 						}
 
-						diff := difficulty(cs.ChildTarget)
-						log.Debug("difficulty", zap.Uint64("difficulty", diff))
-
-						writeResponse(req, true, nil)
+						writeResponse(req, true, "")
 						writeRequest("mining.set_difficulty", []any{
 							// TODO: Setting this to the block target or trying to
 							// calculate the difficulty does not appear to work. I
@@ -349,9 +304,9 @@ func (s *Server) Listen(l net.Listener) error {
 							// I have no idea what to set this to and it's entirely
 							// possible I'm not calculating the difficulty correctly.
 							//diff,
-							10000,
+							10,
 						})
-						if err := sendNotify(true); err != nil {
+						if err := sendNotify(false); err != nil {
 							log.Warn("failed to send notify", zap.Error(err))
 						}
 					case "mining.submit":
@@ -360,56 +315,64 @@ func (s *Server) Listen(l net.Listener) error {
 							panic(err)
 						}
 						jobID := paramOrDefault(req.Params, 1, "")
-						extranonce2, err := hex.DecodeString(paramOrDefault(req.Params, 2, ""))
-						if err != nil {
-							log.Debug("failed to decode extranonce2", zap.String("extranonce2", paramOrDefault(req.Params, 2, "")), zap.Error(err))
-							writeResponse(req, false, []any{"invalid extranonce2"})
-							continue
-						} else if len(extranonce2) != 4 {
-							log.Debug("invalid extranonce2 length", zap.String("extranonce2", paramOrDefault(req.Params, 2, "")))
-							writeResponse(req, false, []any{"invalid extranonce2"})
-							continue
-						}
+						extranonce2 := paramOrDefault(req.Params, 2, "")
 
 						nTimeStr := paramOrDefault(req.Params, 3, "")
 						nonceStr := paramOrDefault(req.Params, 4, "")
-						log.Debug("params", zap.String("nTime", nTimeStr), zap.String("nonce", nonceStr))
 
-						nonce, err := hex.DecodeString(nonceStr)
+						nonceBuf, err := hex.DecodeString(nonceStr)
 						if err != nil {
 							log.Debug("failed to decode nonce", zap.String("nonce", nonceStr), zap.Error(err))
-							writeResponse(req, false, []any{"invalid nonce"})
+							writeResponse(req, false, "invalid nonce")
 							continue
 						}
+						nonce := binary.LittleEndian.Uint64(nonceBuf)
+
 						timeBuf, err := hex.DecodeString(nTimeStr)
 						if err != nil {
 							log.Debug("failed to decode nTime", zap.String("nTimeStr", nTimeStr), zap.Error(err))
-							writeResponse(req, false, []any{"invalid nTime"})
+							writeResponse(req, false, "invalid nTime")
+							continue
+						}
+						timestamp := time.Unix(int64(binary.LittleEndian.Uint64(timeBuf)), 0)
+						log := log.With(zap.String("jobID", jobID), zap.Uint64("nonce", nonce), zap.Time("nTime", timestamp))
+
+						coinbaseTxn, err := stratum.ParseCoinbaseTxn(coinbase1, extranonce1, extranonce2, coinbase2)
+						if err != nil {
+							log.Debug("failed to parse coinbase txn", zap.String("coinbase1", coinbase1), zap.String("coinbase2", coinbase2),
+								zap.String("extranonce1", extranonce1), zap.String("extranonce2", extranonce2), zap.Error(err))
+							writeResponse(req, false, "invalid coinbase")
 							continue
 						}
 
-						log.Debug("received time", zap.String("time", fmt.Sprint(timeBuf)))
-						timestamp := time.Unix(int64(binary.LittleEndian.Uint64(timeBuf)), 0)
-
-						log := log.With(zap.String("jobID", jobID), zap.String("nonce", nonceStr), zap.Uint64("nonceU64", binary.LittleEndian.Uint64(nonce)),
-							zap.Time("nTime", timestamp))
-
-						b, err := s.getBlockForBroadcast(types.VoidAddress, nonce, extranonce1, extranonce2, timestamp)
+						b, err := s.getBlockForBroadcast(cs, types.VoidAddress, nonce, timestamp, coinbaseTxn)
 						if err != nil {
 							log.Debug("failed to get block for broadcast", zap.Error(err))
-							writeResponse(req, false, []any{"invalid nonce"})
+							writeResponse(req, false, "invalid nonce")
+							continue
+						}
+
+						if b.ID().CmpWork(cs.ChildTarget) < 0 {
+							// ignore invalid shares. It'll find one eventually
+							log.Debug("not enough work", zap.Stringer("id", b.ID()), zap.Stringer("target", cs.ChildTarget))
 							continue
 						}
 
 						log.Debug("built block", zap.Stringer("id", b.ID()), zap.Stringer("target", cs.ChildTarget),
 							zap.String("nTimeStr", nTimeStr), zap.String("nonceStr", nonceStr))
-						//extranonce1 = frand.Bytes(4)
+						extranonce1 = hex.EncodeToString(frand.Bytes(4)) // refresh extranonce1
 
-						if err := s.client.SyncerBroadcastBlock(b); err != nil {
-							log.Debug("failed to broadcast block", zap.Error(err))
-							writeResponse(req, false, []any{"invalid nonce"})
-							continue
+						if err := writeResponse(req, true, ""); err != nil {
+							log.Warn("failed to send success response", zap.Error(err))
+							return
 						}
+
+						go func() {
+							if err := s.client.SyncerBroadcastBlock(b); err != nil {
+								log.Debug("failed to broadcast block", zap.Error(err))
+							}
+						}()
+
 					}
 				}
 			}
