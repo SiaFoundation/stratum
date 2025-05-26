@@ -129,7 +129,10 @@ func TestBlockMerkleBranches(t *testing.T) {
 		coinbaseTxn := types.V2Transaction{
 			ArbitraryData: []byte{0x04, 0x05, 0x06},
 		}
-		root := coinbaseTxn.FullHash()
+		h := types.NewHasher()
+		h.E.WriteUint8(0x00)
+		coinbaseTxn.EncodeTo(h.E)
+		root := h.Sum()
 
 		// hardfork active
 		n, _ := testutil.Network()

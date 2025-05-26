@@ -56,46 +56,46 @@ func BlockMerkleBranches(cs consensus.State, minerPayouts []types.SiacoinOutput,
 		leafHashPrefix = 0x00
 	)
 	acc := new(blake2b.Accumulator)
-	h := blake2b.New256()
-	enc := types.NewEncoder(h)
+	h := types.NewHasher()
 	if cs.Index.Height < cs.Network.HardforkV2.AllowHeight {
 		// v1
 		for _, mp := range minerPayouts {
 			h.Reset()
-			enc.WriteUint8(leafHashPrefix)
-			types.V1SiacoinOutput(mp).EncodeTo(enc)
-			enc.Flush()
-			acc.AddLeaf(([32]byte)(h.Sum(nil)))
+			h.E.WriteUint8(leafHashPrefix)
+			types.V1SiacoinOutput(mp).EncodeTo(h.E)
+			acc.AddLeaf(([32]byte)(h.Sum()))
 		}
 		for _, txn := range txns {
 			h.Reset()
-			enc.WriteUint8(leafHashPrefix)
-			txn.EncodeTo(enc)
-			enc.Flush()
-			acc.AddLeaf(([32]byte)(h.Sum(nil)))
+			h.E.WriteUint8(leafHashPrefix)
+			txn.EncodeTo(h.E)
+			acc.AddLeaf(([32]byte)(h.Sum()))
 		}
 	} else {
 		// state is first hashed separately
-		cs.EncodeTo(enc)
-		enc.Flush()
-		stateHash := (types.Hash256)(h.Sum(nil))
+		cs.EncodeTo(h.E)
+		stateHash := h.Sum()
 
 		// first leaf is the current chain state
 		h.Reset()
-		enc.WriteUint8(0)
-		enc.Write([]byte("sia/commitment|"))
-		enc.WriteUint8(2)
-		stateHash.EncodeTo(enc)
-		minerPayouts[0].Address.EncodeTo(enc)
-		enc.Flush()
-		acc.AddLeaf(([32]byte)(h.Sum(nil)))
+		h.E.WriteUint8(0)
+		h.E.Write([]byte("sia/commitment|"))
+		h.E.WriteUint8(2)
+		stateHash.EncodeTo(h.E)
+		minerPayouts[0].Address.EncodeTo(h.E)
+		h.E.Flush()
+		acc.AddLeaf(h.Sum())
 		for _, txn := range txns {
 			h.Reset()
-			acc.AddLeaf(txn.FullHash())
+			h.E.WriteUint8(leafHashPrefix)
+			txn.EncodeTo(h.E)
+			acc.AddLeaf(h.Sum())
 		}
 		for _, txn := range v2txns {
 			h.Reset()
-			acc.AddLeaf(txn.FullHash())
+			h.E.WriteUint8(leafHashPrefix)
+			txn.EncodeTo(h.E)
+			acc.AddLeaf(h.Sum())
 		}
 	}
 
