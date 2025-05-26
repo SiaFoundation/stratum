@@ -83,7 +83,7 @@ func blockMerkleRoot(minerPayouts []types.SiacoinOutput, transactions []types.Tr
 }
 
 func TestBlockMerkleBranches(t *testing.T) {
-	minerPayouts := make([]types.SiacoinOutput, frand.Intn(100))
+	minerPayouts := make([]types.SiacoinOutput, 1+frand.Intn(99))
 	txns := make([]types.Transaction, frand.Intn(100))
 	v2txns := make([]types.V2Transaction, frand.Intn(100))
 	for i := range minerPayouts {
