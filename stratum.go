@@ -70,18 +70,7 @@ func BlockMerkleBranches(cs consensus.State, minerPayouts []types.SiacoinOutput,
 		}
 	} else {
 		// state is first hashed separately
-		cs.EncodeTo(h.E)
-		stateHash := h.Sum()
-
-		// first leaf is the current chain state
-		h.Reset()
-		h.E.WriteUint8(0)
-		h.E.Write([]byte("sia/commitment|"))
-		h.E.WriteUint8(2)
-		stateHash.EncodeTo(h.E)
-		minerPayouts[0].Address.EncodeTo(h.E)
-		h.E.Flush()
-		acc.AddLeaf(h.Sum())
+		acc.AddLeaf(cs.MerkleLeafHash(minerPayouts[0].Address))
 		for _, txn := range txns {
 			acc.AddLeaf(txn.MerkleLeafHash())
 		}
