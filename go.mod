@@ -3,7 +3,7 @@ module go.sia.tech/stratum // v0.0.3
 go 1.24.2
 
 require (
-	go.sia.tech/core v0.16.0
+	go.sia.tech/core v0.17.0
 	go.sia.tech/coreutils v0.17.0
 	lukechampine.com/frand v1.5.1
 )
