@@ -3,8 +3,8 @@ module go.sia.tech/stratum // v0.0.3
 go 1.24.2
 
 require (
-	go.sia.tech/core v0.17.3
-	go.sia.tech/coreutils v0.18.1
+	go.sia.tech/core v0.17.4
+	go.sia.tech/coreutils v0.18.2
 	lukechampine.com/frand v1.5.1
 )
 
@@ -12,7 +12,7 @@ require (
 	github.com/quic-go/qpack v0.5.1 // indirect
 	github.com/quic-go/quic-go v0.54.0 // indirect
 	github.com/quic-go/webtransport-go v0.9.0 // indirect
-	go.etcd.io/bbolt v1.4.2 // indirect
+	go.etcd.io/bbolt v1.4.3 // indirect
 	go.sia.tech/mux v1.4.0 // indirect
 	go.uber.org/mock v0.5.2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
