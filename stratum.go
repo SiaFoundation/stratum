@@ -63,7 +63,7 @@ func BlockMerkleBranches(cs consensus.State, minerPayouts []types.SiacoinOutput,
 			h.Reset()
 			h.E.WriteUint8(leafHashPrefix)
 			types.V1SiacoinOutput(mp).EncodeTo(h.E)
-			acc.AddLeaf(([32]byte)(h.Sum()))
+			acc.AddLeaf(h.Sum())
 		}
 		for _, txn := range txns {
 			acc.AddLeaf(txn.MerkleLeafHash())
