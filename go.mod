@@ -4,7 +4,7 @@ go 1.24.2
 
 require (
 	go.sia.tech/core v0.18.0
-	go.sia.tech/coreutils v0.18.5
+	go.sia.tech/coreutils v0.18.6
 	lukechampine.com/frand v1.5.1
 )
 
