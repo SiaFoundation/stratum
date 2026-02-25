@@ -1,6 +1,6 @@
 module go.sia.tech/stratum // v0.0.3
 
-go 1.24.2
+go 1.26.0
 
 require (
 	go.sia.tech/core v0.19.0
