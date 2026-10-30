@@ -1,4 +1,4 @@
-module go.sia.tech/stratum // v0.1.1
+module go.sia.tech/stratum // v0.1.2
 
 go 1.26.0
 
